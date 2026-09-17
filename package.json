@@ -1,0 +1,31 @@
+{
+  "name": "ciyu",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "build:words": "node scripts/build-words.mjs data-src/v2.txt data-src/lemma_df.csv data-src/cet4.json",
+    "test:e2e": "node scripts/e2e-smoke.mjs",
+    "fetch:data": "node scripts/fetch-data.mjs",
+    "gen:snippets": "node --experimental-strip-types scripts/gen-snippets.mjs && node --experimental-strip-types scripts/fix-snippets.mjs && node scripts/split-snippets.mjs"
+  },
+  "dependencies": {
+    "dexie": "^4.4.6",
+    "pinia": "^4.0.3",
+    "ts-fsrs": "^5.4.2",
+    "vue": "^3.5.42",
+    "vue-router": "^5.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "@vue/tsconfig": "^0.9.1",
+    "playwright": "^1.63.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0",
+    "vue-tsc": "^3.3.11"
+  }
+}

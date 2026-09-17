@@ -1,0 +1,32 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# 本地调试脚本
+scripts/_*.mjs
+# 上游原始数据（体积大，构建脚本按需下载）
+data-src/cet4.json
+
+# 未拆分的整包剧情（构建脚本产物备份）
+data-src/snippets-full/
