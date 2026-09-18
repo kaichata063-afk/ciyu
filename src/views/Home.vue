@@ -35,11 +35,14 @@ const providerLabel = computed(() => ({ deepseek: 'DeepSeek', anthropic: 'Claude
 <template>
   <div class="two-col">
     <div class="stack">
-      <div class="row between">
+      <div class="row between" style="align-items: flex-start">
         <div>
           <div class="muted small">{{ S.s.plainMode ? '词屿' : S.theme.name }}</div>
           <h1>第 {{ chapter }} {{ S.t('chapter') }}<template v-if="chapterTitle"> — {{ chapterTitle }}</template></h1>
         </div>
+        <router-link :to="{ path: '/settings', query: { focus: 'ai' } }" class="chip sm" :class="{ on: S.hasKey }" style="white-space: nowrap; margin-top: 4px">
+          {{ S.hasKey ? '● ' + providerLabel : '⚡ 填入 API' }}
+        </router-link>
       </div>
 
       <div class="cover">
@@ -47,6 +50,16 @@ const providerLabel = computed(() => ({ deepseek: 'DeepSeek', anthropic: 'Claude
         <router-link to="/go" class="btn block">{{ doneToday ? S.t('more') : S.t('start') }} ▶</router-link>
         <p v-if="due" class="muted small center" style="margin: 12px 0 0">{{ S.t('due') }}：{{ due }} 位</p>
       </div>
+
+      <router-link v-if="!S.hasKey" :to="{ path: '/settings', query: { focus: 'ai' } }" class="card" style="display:block; border-color: var(--accent)">
+        <div class="row between">
+          <b>⚡ 有自己的 DeepSeek / Claude / GPT 密钥？</b>
+          <span style="color: var(--accent)">去填入 ›</span>
+        </div>
+        <p class="muted small" style="margin: 6px 0 0">
+          填入后，过场与新剧情按你的世界和口味即时生成。不填也能用（内置 15,000 段剧情，免费）。密钥只存本机。
+        </p>
+      </router-link>
 
       <div class="row" style="gap: 16px">
         <div class="card" style="flex:1">
@@ -83,19 +96,10 @@ const providerLabel = computed(() => ({ deepseek: 'DeepSeek', anthropic: 'Claude
         <div class="row between"><span class="muted">还没见过</span><b>{{ total - met }}</b></div>
       </div>
 
-      <router-link v-if="!S.hasKey" to="/settings" class="card" style="display:block; border-style: dashed">
-        <div class="row between">
-          <b>✦ 接入你自己的 AI</b>
-          <span class="muted small">可选 ›</span>
-        </div>
-        <p class="muted small" style="margin: 6px 0 0">
-          现在用的是内置剧情（免费、不联网调用）。填入你自己的 <b style="color: var(--fg)">DeepSeek / Claude / GPT</b> 密钥后，每段过场与新剧情都会按你的世界和口味即时生成。密钥只保存在这台设备的浏览器里。
-        </p>
-      </router-link>
-      <div v-else class="card small">
+      <div v-if="S.hasKey" class="card small">
         <div class="row between">
           <span><b style="color: var(--accent)">●</b> AI 剧情已接入 · {{ providerLabel }}</span>
-          <router-link to="/settings" class="muted">管理 ›</router-link>
+          <router-link :to="{ path: '/settings', query: { focus: 'ai' } }" class="muted">管理 ›</router-link>
         </div>
         <p v-if="!S.s.allowGenerate" class="muted" style="margin: 6px 0 0">即时生成已暂停，当前使用内置剧情。</p>
       </div>

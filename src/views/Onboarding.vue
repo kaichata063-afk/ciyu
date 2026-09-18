@@ -28,6 +28,7 @@ function next() {
   if (step.value === 0 && groups.value.length === 0) { step.value = 3; return }
   step.value++
 }
+function goAi() { S.s.interests = [...items.value]; S.s.tone = tone.value; S.s.themeId = theme.value.id; S.s.onboarded = true; router.replace({ path: '/settings', query: { focus: 'ai' } }) }
 async function finish() {
   busy.value = true
   let tags: string[] = []
@@ -101,6 +102,7 @@ async function finish() {
         </div>
       </div>
       <p class="muted small">之后随时可以在「世界设置」里换一个世界，进度都会保留。</p>
+      <p class="small"><a href="#/settings?focus=ai" style="color: var(--accent)" @click.prevent="goAi">⚡ 已有 DeepSeek / Claude / GPT 密钥？先去填入，剧情按你的口味即时生成 ›</a></p>
       <button class="btn block" :disabled="busy" @click="finish">{{ busy ? '正在铺路…' : theme.terms.start + ' ▶' }}</button>
       <div class="chips">
         <button v-for="t in Object.values(THEMES)" :key="t.id" class="chip sm" :class="{ on: theme.id === t.id }" @click="items = [...t.covers.slice(0, 1)]">{{ t.name }}</button>

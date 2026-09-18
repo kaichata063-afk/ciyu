@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useSettings, DEFAULT_MODELS, DEFAULT_BASE_URLS, type Provider } from '../stores/settings'
 import { THEME_LIST, TONES } from '../themes'
 import { ping } from '../llm'
@@ -8,6 +8,7 @@ import { exportArchive, importArchive, wipeAll } from '../db'
 
 const S = useSettings()
 const router = useRouter()
+const route = useRoute()
 const providers: { id: Provider; label: string; site: string; steps: string[]; note: string }[] = [
   { id: 'deepseek', label: 'DeepSeek', site: 'https://platform.deepseek.com/api_keys',
     steps: ['注册并充值（10 元起，够用几个月）', '左侧「API keys」→ 创建 → 复制以 sk- 开头的密钥', '粘贴到下方，点「测试连接」'],
@@ -27,6 +28,9 @@ const baseUrl = computed({ get: () => S.s.baseUrls[p.value] || '', set: v => { S
 const testing = ref(false)
 const testMsg = ref('')
 const showKey = ref(false)
+const showAdvanced = ref(!!(S.s.models[S.s.provider] || S.s.baseUrls[S.s.provider]))
+const keyEl = ref<HTMLInputElement | null>(null)
+onMounted(() => { if (route.query.focus === 'ai') nextTick(() => { keyEl.value?.scrollIntoView({ block: 'center' }); keyEl.value?.focus() }) })
 
 async function test() {
   testing.value = true; testMsg.value = ''
@@ -77,6 +81,50 @@ async function wipe() {
   <div class="stack">
     <h1>{{ S.t('nav_settings') }}</h1>
 
+    <div class="card stack" id="ai" :style="S.hasKey ? '' : 'border-color: var(--accent)'">
+      <div class="row between">
+        <h3 style="margin:0">{{ S.hasKey ? '● AI 剧情已接入' : '⚡ 填入 API 密钥' }} <span class="muted small" v-if="!S.hasKey">（可选）</span></h3>
+        <span v-if="S.hasKey" class="small" style="color: var(--accent)">{{ cur.label }}</span>
+      </div>
+      <div class="chips">
+        <button v-for="pr in providers" :key="pr.id" class="chip" :class="{ on: S.s.provider === pr.id }" @click="S.s.provider = pr.id">{{ pr.label }}<span v-if="S.s.apiKeys[pr.id]" style="margin-left:6px; color: var(--accent)">●</span></button>
+      </div>
+      <div class="field">
+        <label>{{ cur.label }} API 密钥</label>
+        <div class="row">
+          <input ref="keyEl" :type="showKey ? 'text' : 'password'" v-model="key" :placeholder="cur.id === 'anthropic' ? 'sk-ant-…' : 'sk-…'" style="flex:1; font-size: 16px" autocomplete="off" spellcheck="false" />
+          <button class="btn ghost sm" @click="showKey = !showKey">{{ showKey ? '隐藏' : '显示' }}</button>
+        </div>
+      </div>
+      <div class="row wrap">
+        <button class="btn sm" :disabled="!key || testing" @click="test">{{ testing ? '测试中…' : '测试连接' }}</button>
+        <button class="btn ghost sm" @click="showAdvanced = !showAdvanced">{{ showAdvanced ? '收起' : '模型 / 接口地址' }}</button>
+        <button v-if="key" class="btn ghost sm" style="color: var(--accent2)" @click="key = ''">清除密钥</button>
+      </div>
+      <p v-if="testMsg" class="small" :style="{ color: testMsg.startsWith('✓') ? 'var(--accent)' : 'var(--accent2)' }">{{ testMsg }}</p>
+      <template v-if="showAdvanced">
+        <div class="field"><label>模型（留空用默认：{{ DEFAULT_MODELS[p] }}）</label><input v-model="model" :placeholder="DEFAULT_MODELS[p]" /></div>
+        <div class="field"><label>接口地址（留空用官方：{{ DEFAULT_BASE_URLS[p] }}；用第三方中转就填中转地址）</label><input v-model="baseUrl" :placeholder="DEFAULT_BASE_URLS[p]" /></div>
+      </template>
+      <details class="small">
+        <summary style="cursor:pointer; color: var(--accent)">怎么拿到 {{ cur.label }} 的密钥？填与不填有什么区别？</summary>
+        <div class="card" style="background: var(--bg); margin-top: 10px">
+          <div class="row between"><b>获取 {{ cur.label }} 密钥</b><a :href="cur.site" target="_blank" rel="noopener" style="color: var(--accent)">打开官网 ↗</a></div>
+          <ol style="margin: 8px 0 0; padding-left: 20px"><li v-for="st in cur.steps" :key="st">{{ st }}</li></ol>
+          <p class="muted" style="margin: 8px 0 0">{{ cur.note }}</p>
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px">
+          <div class="card" style="background: var(--bg); padding: 12px"><div class="muted">不填</div><div style="margin-top:4px">用内置剧情包：15,000 段预先写好的片段，免费、不联网调用。</div></div>
+          <div class="card" style="background: var(--bg); padding: 12px; border-color: var(--accent)"><div style="color: var(--accent)">填了</div><div style="margin-top:4px">每段过场、口味点缀、缺失片段都由 AI 按你的世界即时写。按你自己的账户计费，每次约几分钱。</div></div>
+        </div>
+        <p class="muted" style="margin: 10px 0 0">密钥只保存在这台设备的浏览器里，不会经过词屿的任何服务器（词屿没有服务器）。</p>
+      </details>
+      <template v-if="S.hasKey">
+        <label class="row between"><span>允许用我的密钥即时生成剧情</span><input type="checkbox" class="toggle" v-model="S.s.allowGenerate" /></label>
+        <label class="row between" :style="{ opacity: S.s.allowGenerate ? 1 : .4 }"><span>词片段也全部即时生成 <span class="muted small">— 更个性化，但每段多花几分钱、多等几秒</span></span><input type="checkbox" class="toggle" v-model="S.s.preferFresh" :disabled="!S.s.allowGenerate" /></label>
+      </template>
+    </div>
+
     <div class="card stack">
       <h3>更换世界</h3>
       <div class="chips">
@@ -96,44 +144,6 @@ async function wipe() {
       </div>
       <label class="row between"><span>{{ S.t('plain_mode') }} <span class="muted small">— 关闭剧情与全部趣味包装</span></span><input type="checkbox" class="toggle" v-model="S.s.plainMode" /></label>
       <label class="row between"><span>音效</span><input type="checkbox" class="toggle" v-model="S.s.sound" /></label>
-    </div>
-
-    <div class="card stack">
-      <h3>接入你自己的 AI（可选）</h3>
-      <div class="small" style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px">
-        <div class="card" style="background: var(--bg); padding: 12px">
-          <div class="muted">不填密钥</div>
-          <div style="margin-top:4px">用内置剧情包：15,000 段预先写好的片段，免费、不联网调用，随时可用。</div>
-        </div>
-        <div class="card" style="background: var(--bg); padding: 12px; border-color: var(--accent)">
-          <div style="color: var(--accent)">填了密钥</div>
-          <div style="margin-top:4px">每段过场、自定义口味的点缀、内置包缺失的片段，都由 AI 按你的世界即时写出。按你自己的账户计费，每次约几分钱。</div>
-        </div>
-      </div>
-      <p class="muted small">密钥只保存在这台设备的浏览器里，不会经过词屿的任何服务器（词屿没有服务器）。</p>
-      <div class="chips">
-        <button v-for="pr in providers" :key="pr.id" class="chip" :class="{ on: S.s.provider === pr.id }" @click="S.s.provider = pr.id">{{ pr.label }}<span v-if="S.s.apiKeys[pr.id]" style="margin-left:6px">●</span></button>
-      </div>
-      <div class="card small" style="background: var(--bg)">
-        <div class="row between"><b>怎么拿到 {{ cur.label }} 的密钥</b><a :href="cur.site" target="_blank" rel="noopener" style="color: var(--accent)">打开官网 ↗</a></div>
-        <ol style="margin: 8px 0 0; padding-left: 20px"><li v-for="s in cur.steps" :key="s">{{ s }}</li></ol>
-        <p class="muted" style="margin: 8px 0 0">{{ cur.note }}</p>
-      </div>
-      <div class="field">
-        <label>API 密钥</label>
-        <div class="row">
-          <input :type="showKey ? 'text' : 'password'" v-model="key" placeholder="sk-…" style="flex:1" autocomplete="off" />
-          <button class="btn ghost sm" @click="showKey = !showKey">{{ showKey ? '隐藏' : '显示' }}</button>
-        </div>
-      </div>
-      <div class="field"><label>模型（留空用默认：{{ DEFAULT_MODELS[p] }}）</label><input v-model="model" :placeholder="DEFAULT_MODELS[p]" /></div>
-      <div class="field"><label>接口地址（留空用官方：{{ DEFAULT_BASE_URLS[p] }}；可填中转地址）</label><input v-model="baseUrl" :placeholder="DEFAULT_BASE_URLS[p]" /></div>
-      <label class="row between"><span>允许用我的密钥即时生成剧情</span><input type="checkbox" class="toggle" v-model="S.s.allowGenerate" /></label>
-      <label class="row between" :style="{ opacity: S.s.allowGenerate ? 1 : .4 }"><span>词片段也全部即时生成 <span class="muted small">— 更个性化，但每段多花几分钱、多等几秒</span></span><input type="checkbox" class="toggle" v-model="S.s.preferFresh" :disabled="!S.s.allowGenerate" /></label>
-      <div class="row">
-        <button class="btn sm" :disabled="!key || testing" @click="test">{{ testing ? '测试中…' : '测试连接' }}</button>
-        <span class="small" :class="{ muted: !testMsg }">{{ testMsg }}</span>
-      </div>
     </div>
 
     <div class="card stack">
