@@ -11,6 +11,7 @@ import {
 import { extractJSON, generate } from '../llm'
 import { chapterScenePrompt, systemPrompt } from '../llm/prompts'
 import { markKnown, newWordState } from '../engine/fsrs'
+import { localizeNames } from '../engine/content'
 import type { Question, Session, WordState } from '../types'
 import { playSfx } from '../sfx'
 
@@ -37,6 +38,7 @@ const startedAt = ref(0)
 const promoted = ref(false)
 const scene = ref<{ en: string; cn: string; hook: string } | null>(null)
 const sceneLoading = ref(false)
+const genError = ref('')
 const showMeaning = ref(false)
 
 const chapter = ref(1)
@@ -59,7 +61,7 @@ async function init() {
   session.value = newSession(S.theme.id, all)
   await db.sessions.put(plain(session.value))
   qs.value = await buildQuestions(plan, w, st, {
-    theme: S.theme, tone: S.s.tone, styleTags: S.s.styleTags, plain: S.s.plainMode, llm: llmCfg.value, chapterTitle: chapterTitle.value,
+    theme: S.theme, tone: S.s.tone, styleTags: S.s.styleTags, plain: S.s.plainMode, llm: llmCfg.value, chapterTitle: chapterTitle.value, preferFresh: S.s.preferFresh,
   })
   const last = await db.sessions.orderBy('startedAt').reverse().offset(1).first()
   openHook.value = S.s.plainMode ? '' : (localStorage.getItem('ciyu:lastHook') || pick(S.theme.characters[0].greet, (last?.startedAt || 0) % 7))
@@ -157,8 +159,11 @@ async function finishSession() {
         system: systemPrompt(S.theme, S.s.tone, S.s.styleTags), json: llmCfg.value.provider !== 'anthropic', maxTokens: 500,
       })
       const j = extractJSON<{ en: string; cn: string; hook: string }>(txt)
-      if (j.en) scene.value = j
-    } catch (e) { console.warn(e) }
+      if (j.en) scene.value = { en: String(j.en), cn: localizeNames(String(j.cn || ''), S.theme), hook: String(j.hook || '') }
+    } catch (e) {
+      console.warn(e)
+      genError.value = String((e as any)?.message || e).slice(0, 120)
+    }
   }
   if (!scene.value) {
     // 兜底：把各片段的 hook 串起来
@@ -189,7 +194,10 @@ const sceneHtml = computed(() => (scene.value?.en || '').replace(/\*([^*]+)\*/g,
 
 <template>
   <div class="session-wrap stack">
-    <div v-if="phase === 'loading'" class="center muted" style="padding-top: 30vh">正在铺路…</div>
+    <div v-if="phase === 'loading'" class="center muted" style="padding-top: 30vh">
+      <div>正在铺路…</div>
+      <div v-if="llmCfg && S.s.preferFresh" class="small" style="margin-top: 8px">{{ S.theme.characters[2].name }}正在为你即时写这一段（约 10–30 秒）</div>
+    </div>
 
     <div v-else-if="phase === 'empty'" class="center stack" style="padding-top: 20vh">
       <h2>今天没有想见你的老朋友，新面孔也都见过了。</h2>
@@ -254,9 +262,14 @@ const sceneHtml = computed(() => (scene.value?.en || '').replace(/\*([^*]+)\*/g,
         <template v-else-if="scene">
           <p class="snippet" v-if="scene.en" v-html="sceneHtml"></p>
           <p class="hint-cn" v-if="scene.cn">{{ scene.cn }}</p>
-          <p class="hook">{{ scene.hook }}</p>
+          <p class="hook" style="color: var(--fg); opacity: .85">{{ scene.hook }}</p>
         </template>
+        <p v-if="genError" class="muted small" style="margin-top: 10px">（AI 生成未成功，已改用内置片段：{{ genError }}）</p>
       </div>
+      <router-link v-if="!S.s.plainMode && !S.hasKey" to="/settings" class="card small" style="display:block; border-style: dashed">
+        <b>想让这段过场由 AI 按你的世界即时写出来？</b>
+        <div class="muted" style="margin-top:4px">在{{ S.t('nav_settings') }}里填入你自己的 DeepSeek / Claude / GPT 密钥即可，密钥只存本机。当前显示的是内置片段串联。</div>
+      </router-link>
 
       <div class="card center">
         <p class="snippet" style="font-size: 17px; margin: 0 0 14px">

@@ -8,11 +8,18 @@ import { exportArchive, importArchive, wipeAll } from '../db'
 
 const S = useSettings()
 const router = useRouter()
-const providers: { id: Provider; label: string; help: string }[] = [
-  { id: 'deepseek', label: 'DeepSeek', help: 'platform.deepseek.com 创建密钥；OpenAI 兼容接口，价格最低。' },
-  { id: 'anthropic', label: 'Claude', help: 'console.anthropic.com 创建密钥；支持浏览器直连。' },
-  { id: 'openai', label: 'GPT', help: 'platform.openai.com 创建密钥。' },
+const providers: { id: Provider; label: string; site: string; steps: string[]; note: string }[] = [
+  { id: 'deepseek', label: 'DeepSeek', site: 'https://platform.deepseek.com/api_keys',
+    steps: ['注册并充值（10 元起，够用几个月）', '左侧「API keys」→ 创建 → 复制以 sk- 开头的密钥', '粘贴到下方，点「测试连接」'],
+    note: '国内直连、最便宜。官方接口对浏览器直连可能受限，若测试报 CORS，把「接口地址」换成支持跨域的中转地址。' },
+  { id: 'anthropic', label: 'Claude', site: 'https://console.anthropic.com/settings/keys',
+    steps: ['登录控制台并绑定付款方式', '「API Keys」→ Create Key → 复制以 sk-ant- 开头的密钥', '粘贴到下方，点「测试连接」'],
+    note: '官方接口支持浏览器直连。若你用的是第三方中转（如 new-api 站点），把站点地址填到「接口地址」，模型名按站点提供的填。' },
+  { id: 'openai', label: 'GPT', site: 'https://platform.openai.com/api-keys',
+    steps: ['登录并充值', '「API keys」→ Create new secret key → 复制以 sk- 开头的密钥', '粘贴到下方，点「测试连接」'],
+    note: '官方接口支持浏览器直连；国内网络可能需要中转地址。' },
 ]
+const cur = computed(() => providers.find(x => x.id === S.s.provider)!)
 const p = computed(() => S.s.provider)
 const key = computed({ get: () => S.s.apiKeys[p.value] || '', set: v => { S.s.apiKeys = { ...S.s.apiKeys, [p.value]: v.trim() } } })
 const model = computed({ get: () => S.s.models[p.value] || '', set: v => { S.s.models = { ...S.s.models, [p.value]: v.trim() } } })
@@ -29,7 +36,10 @@ async function test() {
   } catch (e: any) {
     const m = String(e?.message || e)
     testMsg.value = /Failed to fetch|NetworkError|CORS/i.test(m)
-      ? '× 浏览器直连被拒绝（CORS）。可改用支持直连的中转地址，或参考仓库 worker/ 目录自建一个中转。'
+      ? '× 浏览器无法直连这个接口（跨域被拒或网络不通）。请在「接口地址」填一个支持浏览器访问的中转地址；也可以按仓库 worker/relay.js 自己免费部署一个。'
+      : /401|invalid.*key|authentication/i.test(m) ? '× 密钥无效或已过期，请重新复制。'
+      : /402|insufficient|balance|quota|余额/i.test(m) ? '× 账户余额不足，请先充值。'
+      : /404|model/i.test(m) ? `× 模型名不对或该接口不提供此模型。当前：${model.value || DEFAULT_MODELS[p.value]}`
       : `× ${m.slice(0, 160)}`
   } finally { testing.value = false }
 }
@@ -89,12 +99,26 @@ async function wipe() {
     </div>
 
     <div class="card stack">
-      <h3>AI 剧情（可选）</h3>
-      <p class="muted small">不填也能用：内置片段与真题原句免费可用。填入你自己的密钥后，剧情会按你的世界与口味即时生成。密钥只保存在这台设备的浏览器里，不会上传到任何服务器。</p>
+      <h3>接入你自己的 AI（可选）</h3>
+      <div class="small" style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px">
+        <div class="card" style="background: var(--bg); padding: 12px">
+          <div class="muted">不填密钥</div>
+          <div style="margin-top:4px">用内置剧情包：15,000 段预先写好的片段，免费、不联网调用，随时可用。</div>
+        </div>
+        <div class="card" style="background: var(--bg); padding: 12px; border-color: var(--accent)">
+          <div style="color: var(--accent)">填了密钥</div>
+          <div style="margin-top:4px">每段过场、自定义口味的点缀、内置包缺失的片段，都由 AI 按你的世界即时写出。按你自己的账户计费，每次约几分钱。</div>
+        </div>
+      </div>
+      <p class="muted small">密钥只保存在这台设备的浏览器里，不会经过词屿的任何服务器（词屿没有服务器）。</p>
       <div class="chips">
         <button v-for="pr in providers" :key="pr.id" class="chip" :class="{ on: S.s.provider === pr.id }" @click="S.s.provider = pr.id">{{ pr.label }}<span v-if="S.s.apiKeys[pr.id]" style="margin-left:6px">●</span></button>
       </div>
-      <p class="muted small">{{ providers.find(x => x.id === p)?.help }}</p>
+      <div class="card small" style="background: var(--bg)">
+        <div class="row between"><b>怎么拿到 {{ cur.label }} 的密钥</b><a :href="cur.site" target="_blank" rel="noopener" style="color: var(--accent)">打开官网 ↗</a></div>
+        <ol style="margin: 8px 0 0; padding-left: 20px"><li v-for="s in cur.steps" :key="s">{{ s }}</li></ol>
+        <p class="muted" style="margin: 8px 0 0">{{ cur.note }}</p>
+      </div>
       <div class="field">
         <label>API 密钥</label>
         <div class="row">
@@ -105,6 +129,7 @@ async function wipe() {
       <div class="field"><label>模型（留空用默认：{{ DEFAULT_MODELS[p] }}）</label><input v-model="model" :placeholder="DEFAULT_MODELS[p]" /></div>
       <div class="field"><label>接口地址（留空用官方：{{ DEFAULT_BASE_URLS[p] }}；可填中转地址）</label><input v-model="baseUrl" :placeholder="DEFAULT_BASE_URLS[p]" /></div>
       <label class="row between"><span>允许用我的密钥即时生成剧情</span><input type="checkbox" class="toggle" v-model="S.s.allowGenerate" /></label>
+      <label class="row between" :style="{ opacity: S.s.allowGenerate ? 1 : .4 }"><span>词片段也全部即时生成 <span class="muted small">— 更个性化，但每段多花几分钱、多等几秒</span></span><input type="checkbox" class="toggle" v-model="S.s.preferFresh" :disabled="!S.s.allowGenerate" /></label>
       <div class="row">
         <button class="btn sm" :disabled="!key || testing" @click="test">{{ testing ? '测试中…' : '测试连接' }}</button>
         <span class="small" :class="{ muted: !testMsg }">{{ testMsg }}</span>

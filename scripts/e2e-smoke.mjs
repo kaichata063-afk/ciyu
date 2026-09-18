@@ -71,7 +71,7 @@ async function run(name, viewport) {
   await shot('08-wordcard')
   await page.click('button:has-text("✕")')
   await page.click('.nav-item >> nth=2')
-  await page.waitForSelector('text=AI 剧情')
+  await page.waitForSelector('text=接入你自己的 AI')
   await shot('09-settings')
   // 切换主题 + 素颜模式
   await page.click('text=云海问道')

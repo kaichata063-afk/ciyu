@@ -29,6 +29,7 @@ const pct = computed(() => nextT.value ? Math.round(((collected.value - prevT.va
 const greet = computed(() => S.s.plainMode ? '今天从这里开始。' : pick(S.theme.characters[0].greet, new Date().getDate()))
 const chapterTitle = computed(() => S.s.plainMode ? '' : S.theme.chapters[chapter.value - 1])
 const doneToday = computed(() => S.s.segmentsToday > 0)
+const providerLabel = computed(() => ({ deepseek: 'DeepSeek', anthropic: 'Claude', openai: 'GPT' } as Record<string, string>)[S.s.provider])
 </script>
 
 <template>
@@ -82,9 +83,22 @@ const doneToday = computed(() => S.s.segmentsToday > 0)
         <div class="row between"><span class="muted">还没见过</span><b>{{ total - met }}</b></div>
       </div>
 
-      <p v-if="!S.hasKey" class="muted small">
-        当前没有填写 API 密钥：剧情使用内置片段与真题原句，不会产生任何费用。想要按你的口味生成专属剧情，可在「{{ S.t('nav_settings') }}」里填入 DeepSeek / Claude / GPT 的密钥（只保存在本机）。
-      </p>
+      <router-link v-if="!S.hasKey" to="/settings" class="card" style="display:block; border-style: dashed">
+        <div class="row between">
+          <b>✦ 接入你自己的 AI</b>
+          <span class="muted small">可选 ›</span>
+        </div>
+        <p class="muted small" style="margin: 6px 0 0">
+          现在用的是内置剧情（免费、不联网调用）。填入你自己的 <b style="color: var(--fg)">DeepSeek / Claude / GPT</b> 密钥后，每段过场与新剧情都会按你的世界和口味即时生成。密钥只保存在这台设备的浏览器里。
+        </p>
+      </router-link>
+      <div v-else class="card small">
+        <div class="row between">
+          <span><b style="color: var(--accent)">●</b> AI 剧情已接入 · {{ providerLabel }}</span>
+          <router-link to="/settings" class="muted">管理 ›</router-link>
+        </div>
+        <p v-if="!S.s.allowGenerate" class="muted" style="margin: 6px 0 0">即时生成已暂停，当前使用内置剧情。</p>
+      </div>
     </div>
   </div>
 </template>

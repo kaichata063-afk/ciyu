@@ -34,6 +34,7 @@ export interface ContentCtx {
   plain: boolean
   llm?: LLMConfig | null
   chapterTitle: string
+  preferFresh?: boolean   // 有密钥时词片段优先即时生成（内置包仅作兜底）
 }
 
 /** 为一组词取片段：IndexedDB 缓存 → 静态包 → 按需生成（有密钥）→ 素颜兜底 */
@@ -50,6 +51,7 @@ export async function getSnippets(words: Word[], slotOf: (w: Word) => number, ct
     const key = `${ctx.theme.id}:${w.id}:${slot}`
     const cached = await db.snippets.get(key)
     if (cached && validate(cached, w)) { out.set(w.id, cached); continue }
+    if (ctx.preferFresh && ctx.llm) { missing.push(w); continue }
     const st = statics[`${w.id}:${slot}`]
     if (st && validate(st, w)) { out.set(w.id, { ...st, cnHint: localizeNames(st.cnHint, ctx.theme), key, theme: ctx.theme.id, wordId: w.id, slot, source: 'static' }); continue }
     missing.push(w)
@@ -62,7 +64,13 @@ export async function getSnippets(words: Word[], slotOf: (w: Word) => number, ct
       console.warn('generate failed, fallback to plain', e)
     }
   }
-  for (const w of words) if (!out.has(w.id)) out.set(w.id, plainSnippet(w, ctx.theme, slotOf(w), false))
+  for (const w of words) if (!out.has(w.id)) {
+    const slot = slotOf(w)
+    const st = statics[`${w.id}:${slot}`]
+    out.set(w.id, st && validate(st, w)
+      ? { ...st, cnHint: localizeNames(st.cnHint, ctx.theme), key: `${ctx.theme.id}:${w.id}:${slot}`, theme: ctx.theme.id, wordId: w.id, slot, source: 'static' }
+      : plainSnippet(w, ctx.theme, slot, false))
+  }
   return out
 }
 

@@ -18,6 +18,7 @@ export interface Settings {
   models: Partial<Record<Provider, string>>
   baseUrls: Partial<Record<Provider, string>>
   allowGenerate: boolean     // 允许用我的密钥按需生成剧情
+  preferFresh: boolean       // 有密钥时，词片段也优先即时生成（而非内置包）
   streakDays: number
   streakBest: number
   leaveTickets: number
@@ -44,6 +45,7 @@ const DEFAULTS: Settings = {
   models: {},
   baseUrls: {},
   allowGenerate: true,
+  preferFresh: false,
   streakDays: 0,
   streakBest: 0,
   leaveTickets: 1,
