@@ -1,7 +1,7 @@
 // 为已生成的剧情片段补"逐句中文"：sentences = [{en, cn, target}]，目标句 cn 留空（界面保留英文）
 // 运行：node --experimental-strip-types scripts/translate-snippets.mjs [--theme cyber] [--chapters 1] [--limit N] [--dry]
 // 密钥：.env.local 的 ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL / ANTHROPIC_MODEL（翻译默认用 claude-haiku-4-5，便宜）
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs'
 import { splitSentences, isTargetSentence } from '../src/engine/text.ts'
 import { THEMES } from '../src/themes/index.ts'
 
@@ -31,20 +31,25 @@ function needs(s) {
 
 function prompt(theme, items) {
   const names = theme.characters.map(c => `${c.en} → ${c.name}`).join('，')
-  const body = items.map((it, i) => `#${i + 1}\n` + it.parts.map((p, k) => `  [${k}]${p.target ? ' (KEEP)' : ''} ${p.en}`).join('\n')).join('\n\n')
-  return `你是中英文学翻译。下面是若干英文短剧情片段，已按句编号。请把每个不带 (KEEP) 标记的句子翻成自然、有画面感的简体中文（口语化，符合剧情语气，不要直译腔）；带 (KEEP) 的句子不翻，输出空字符串。
+  const body = items.map((it, i) => it.parts.map((p, k) => `${i + 1}.${k}:${p.target ? ' (KEEP)' : ''} ${p.en}`).join('\n')).join('\n\n')
+  return `你是中英文学翻译。下面是若干英文短剧情片段，句子按「片段号.句号」编号。请把每个不带 (KEEP) 标记的句子翻成自然、有画面感的简体中文（口语化，符合剧情语气，不要直译腔）；带 (KEEP) 的句子跳过、不要输出。
 人名对照（英文→中文，译文必须用中文名）：${names}
-只输出 JSON：{"items":[{"id":1,"cn":["句0译文","句1译文",...]}]}，cn 数组长度必须与该片段句数一致。
+输出规则（务必严格遵守）：每个需翻译的句子占一行，格式为「片段号.句号: 译文」，编号后紧跟英文冒号加一个空格再写译文。一行一句，不要合并，不要输出 (KEEP) 句，不要代码块或任何解释。示例：
+1.0: 雨敲打着窗玻璃。
+1.1: 桌上放着一个没有邮票的信封。
 
 ${body}`
 }
 
 async function call(system, user, maxTokens) {
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const r = await fetch(`${BASE}/v1/messages`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, temperature: 0.3, system, messages: [{ role: 'user', content: user }] }),
-    })
+  for (let attempt = 0; attempt < 6; attempt++) {
+    let r
+    try {
+      r = await fetch(`${BASE}/v1/messages`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': KEY, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, temperature: 0.3, system, messages: [{ role: 'user', content: user }] }),
+      })
+    } catch (e) { await sleep(2000 * (attempt + 1)); continue }   // fetch failed（网络瞬断）→ 重试
     if (r.status === 429 || r.status >= 500) { await sleep(2000 * (attempt + 1)); continue }
     if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`)
     const j = await r.json()
@@ -71,21 +76,24 @@ for (const tid of THEME_IDS) {
   const jobs = []
   for (let i = 0; i < todo.length; i += BATCH) jobs.push(todo.slice(i, i + BATCH))
   let idx = 0
-  const save = () => writeFileSync(path, JSON.stringify(j))
+  const save = () => { const tmp = path + '.tmp'; writeFileSync(tmp, JSON.stringify(j)); renameSync(tmp, path) }  // 原子写：被 kill 也不会截断损坏
   const worker = async () => {
     while (idx < jobs.length) {
       const job = jobs[idx++]
       const items = job.map(([k, s]) => ({ k, s, parts: splitSentences(s.en).map(en => ({ en, target: isTargetSentence(en) })) }))
       try {
-        const txt = await call('You translate English fiction into vivid, natural Simplified Chinese. Output JSON only.', prompt(theme, items), 220 * job.length + 100)
-        const out = extractJSON(txt)
-        for (const it of out.items || []) {
-          const src = items[Number(it.id) - 1]
-          if (!src || !Array.isArray(it.cn) || it.cn.length !== src.parts.length) { fail++; continue }
-          src.s.sentences = src.parts.map((p, i) => ({ en: p.en, cn: p.target ? '' : String(it.cn[i] || '').trim(), target: p.target }))
-          if (src.s.sentences.some(x => !x.target && !x.cn)) { delete src.s.sentences; fail++; continue }
-          done++
+        const txt = await call('You translate English fiction into vivid, natural Simplified Chinese. Follow the line format exactly: one line per sentence as "片段号.句号: 译文".', prompt(theme, items), 260 * job.length + 200)
+        const map = new Map()
+        for (const line of txt.split('\n')) {
+          const m = line.match(/^\s*(\d+)\.(\d+)\s*[:：\t]\s*(.+?)\s*$/)
+          if (m) map.set(`${m[1]}.${m[2]}`, m[3].trim())
         }
+        items.forEach((src, i) => {
+          const sents = src.parts.map((p, k) => ({ en: p.en, cn: p.target ? '' : (map.get(`${i + 1}.${k}`) || ''), target: p.target }))
+          if (sents.some(x => !x.target && !x.cn)) { fail++; return }
+          src.s.sentences = sents
+          done++
+        })
         save()
         if (idx % 10 === 0) console.log(`  ${tid} ${idx}/${jobs.length} 批 | 完成 ${done} 失败 ${fail} | tokens in ${usage.in} out ${usage.out}`)
       } catch (e) { fail += job.length; console.log(`  ✗ batch: ${e.message.slice(0, 120)}`) }
