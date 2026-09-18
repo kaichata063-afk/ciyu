@@ -3,6 +3,17 @@ import { extractJSON, generate, type LLMConfig } from '../llm'
 import { snippetsPrompt, systemPrompt } from '../llm/prompts'
 import { pick, type ThemePack, type Tone } from '../themes'
 import type { Snippet, Word } from '../types'
+import { isTargetSentence, splitSentences } from './text'
+
+/** 把英文段落 + 逐句中文数组组合成 sentences；数量不匹配则返回 undefined（界面退回"整段英文 + 中文提示"） */
+export function buildSentences(en: string, cn: string[] | null, theme: ThemePack): Snippet['sentences'] {
+  const parts = splitSentences(en)
+  if (!cn || cn.length !== parts.length) return undefined
+  const out = parts.map((p, i) => ({ en: p, target: isTargetSentence(p), cn: isTargetSentence(p) ? '' : localizeNames(cn[i].trim(), theme) }))
+  if (out.filter(x => x.target).length !== 1) return undefined
+  if (out.some(x => !x.target && !x.cn)) return undefined
+  return out
+}
 
 const staticCache = new Map<string, Record<string, Snippet>>()
 
@@ -77,7 +88,7 @@ export async function getSnippets(words: Word[], slotOf: (w: Word) => number, ct
 async function generateSnippets(words: Word[], slotOf: (w: Word) => number, ctx: ContentCtx) {
   const res = new Map<string, Snippet>()
   const slot = slotOf(words[0])
-  const text = await generate(ctx.llm!, snippetsPrompt(words, slot, ctx.chapterTitle), {
+  const text = await generate(ctx.llm!, snippetsPrompt(words, slot, ctx.chapterTitle, ctx.theme), {
     system: systemPrompt(ctx.theme, ctx.tone, ctx.styleTags),
     json: ctx.llm!.provider !== 'anthropic',
     maxTokens: 300 * words.length + 200,
@@ -92,6 +103,7 @@ async function generateSnippets(words: Word[], slotOf: (w: Word) => number, ctx:
       theme: ctx.theme.id, wordId: w.id, slot: slotOf(w),
       en: String(it.en || ''), cnHint: localizeNames(String(it.cn_hint || it.cnHint || ''), ctx.theme), hook: String(it.hook || ''),
       line: it.line ? String(it.line) : undefined,
+      sentences: buildSentences(String(it.en || ''), Array.isArray(it.cn) ? it.cn.map(String) : null, ctx.theme),
       source: 'generated',
       aigc: { provider: ctx.llm!.provider, model: ctx.llm!.model || '', generatedAt: now },
     }

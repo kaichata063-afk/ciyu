@@ -4,6 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useSettings, DEFAULT_MODELS, DEFAULT_BASE_URLS, type Provider } from '../stores/settings'
 import { THEME_LIST, TONES } from '../themes'
 import { ping } from '../llm'
+import { generateImage } from '../llm/image'
+import { illustrationPrompt } from '../llm/prompts'
 import { exportArchive, importArchive, wipeAll } from '../db'
 
 const S = useSettings()
@@ -27,6 +29,21 @@ const model = computed({ get: () => S.s.models[p.value] || '', set: v => { S.s.m
 const baseUrl = computed({ get: () => S.s.baseUrls[p.value] || '', set: v => { S.s.baseUrls = { ...S.s.baseUrls, [p.value]: v.trim() } } })
 const testing = ref(false)
 const testMsg = ref('')
+const imgTesting = ref(false)
+const imgMsg = ref('')
+const imgPreview = ref('')
+async function testImage() {
+  const cfg = S.imageCfg
+  if (!cfg) return
+  imgTesting.value = true; imgMsg.value = ''; imgPreview.value = ''
+  try {
+    imgPreview.value = await generateImage(cfg, illustrationPrompt(`Rain on a neon street. ${S.theme.characters[0].en} hands the narrator a folded note.`, S.theme))
+    imgMsg.value = '✓ 生成成功'
+  } catch (e: any) {
+    const m = String(e?.message || e)
+    imgMsg.value = /Failed to fetch|CORS/i.test(m) ? '× 浏览器无法直连该图像接口，请填中转地址' : /401|invalid/i.test(m) ? '× 密钥无效' : /402|billing|quota/i.test(m) ? '× 余额不足或未开通图像权限' : `× ${m.slice(0, 140)}`
+  } finally { imgTesting.value = false }
+}
 const showKey = ref(false)
 const showAdvanced = ref(!!(S.s.models[S.s.provider] || S.s.baseUrls[S.s.provider]))
 const keyEl = ref<HTMLInputElement | null>(null)
@@ -126,6 +143,26 @@ async function wipe() {
     </div>
 
     <div class="card stack">
+      <div class="row between">
+        <h3 style="margin:0">🎨 简笔漫画配图 <span class="muted small">（可选）</span></h3>
+        <input type="checkbox" class="toggle" v-model="S.s.illustrate" />
+      </div>
+      <p class="muted small">开启后，每答对一题、每段过场结束时，用图像模型为这一幕画一张黑白线稿。需要一个支持 <code>/v1/images/generations</code> 的密钥（OpenAI 的 gpt-image-1 / dall-e-3，或兼容中转）。每张约 0.01–0.04 美元，按你自己的账户计费。</p>
+      <template v-if="S.s.illustrate">
+        <p v-if="!S.s.imageKey && S.s.apiKeys.openai" class="small" style="color: var(--accent)">将复用上面的 GPT 密钥。若想单独指定，填下面的字段。</p>
+        <div class="field"><label>图像接口密钥（留空则复用 GPT 密钥）</label><input type="password" v-model="S.s.imageKey" placeholder="sk-…" autocomplete="off" /></div>
+        <div class="field"><label>图像接口地址（留空用 https://api.openai.com）</label><input v-model="S.s.imageBaseUrl" placeholder="https://api.openai.com" /></div>
+        <div class="field"><label>图像模型（留空用 gpt-image-1）</label><input v-model="S.s.imageModel" placeholder="gpt-image-1 / dall-e-3" /></div>
+        <div class="row">
+          <button class="btn sm" :disabled="!S.canIllustrate || imgTesting" @click="testImage">{{ imgTesting ? '生成中…' : '试画一张' }}</button>
+          <span class="small" :style="{ color: imgMsg.startsWith('✓') ? 'var(--accent)' : 'var(--accent2)' }">{{ imgMsg }}</span>
+        </div>
+        <img v-if="imgPreview" :src="imgPreview" style="width: 100%; max-width: 320px; border-radius: 12px" alt="" />
+        <p v-if="!S.canIllustrate" class="muted small">还没有可用的图像密钥。</p>
+      </template>
+    </div>
+
+    <div class="card stack">
       <h3>更换世界</h3>
       <div class="chips">
         <button v-for="t in THEME_LIST" :key="t.id" class="chip" :class="{ on: S.s.themeId === t.id }" @click="switchTheme(t.id)">{{ t.name }}</button>
@@ -142,6 +179,7 @@ async function wipe() {
       <div class="row between"><span>{{ S.t('daily') }}</span>
         <div class="chips"><button v-for="n in [4, 6, 8]" :key="n" class="chip sm" :class="{ on: S.s.pace === n }" @click="S.s.pace = n as 4|6|8">{{ n === 4 ? '轻' : n === 6 ? '标准' : '冲刺' }}({{ n }})</button></div>
       </div>
+      <label class="row between"><span>剧情显示英文原句 <span class="muted small">— 默认只有目标词那句是英文，其余中文；开启后全部显示英文（中文在下）</span></span><input type="checkbox" class="toggle" v-model="S.s.showEnglish" /></label>
       <label class="row between"><span>{{ S.t('plain_mode') }} <span class="muted small">— 关闭剧情与全部趣味包装</span></span><input type="checkbox" class="toggle" v-model="S.s.plainMode" /></label>
       <label class="row between"><span>音效</span><input type="checkbox" class="toggle" v-model="S.s.sound" /></label>
     </div>

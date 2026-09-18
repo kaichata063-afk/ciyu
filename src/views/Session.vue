@@ -6,12 +6,16 @@ import { db, plain } from '../db'
 import { pick } from '../themes'
 import {
   buildQuestions, chapterOf, countCollected, loadStates, loadWords, newSession, planSession,
-  recentAccuracy, recordAnswer, renderEn, blankEn, renderLine, checkSpell, nextThreshold,
+  recentAccuracy, recordAnswer, renderLine, checkSpell, nextThreshold,
 } from '../engine/session'
 import { extractJSON, generate } from '../llm'
 import { chapterScenePrompt, systemPrompt } from '../llm/prompts'
 import { markKnown, newWordState } from '../engine/fsrs'
 import { localizeNames } from '../engine/content'
+import { splitSentences } from '../engine/text'
+import { generateImage } from '../llm/image'
+import { illustrationPrompt } from '../llm/prompts'
+import SnippetText from '../components/SnippetText.vue'
 import type { Question, Session, WordState } from '../types'
 import { playSfx } from '../sfx'
 
@@ -36,7 +40,7 @@ const lastCorrect = ref(false)
 const speech = ref('')
 const startedAt = ref(0)
 const promoted = ref(false)
-const scene = ref<{ en: string; cn: string; hook: string } | null>(null)
+const scene = ref<{ en: string; cn: string; hook: string; sentences?: { en: string; cn: string; target: boolean }[] } | null>(null)
 const sceneLoading = ref(false)
 const genError = ref('')
 const showMeaning = ref(false)
@@ -76,12 +80,6 @@ function resetQ() {
   nextTick(() => spellEl.value?.focus())
 }
 
-const enHtml = computed(() => {
-  if (!q.value) return ''
-  if (q.value.qtype === 'spell') return blankEn(q.value.snippet, q.value.word)
-  if (q.value.qtype === 'fill') return renderEn(q.value.snippet)
-  return renderEn(q.value.snippet)
-})
 const lineHtml = computed(() => q.value?.qtype === 'fill' ? renderLine(q.value.snippet) : '')
 
 function charSay(kind: 'correct' | 'hint' | 'wrong') {
@@ -94,6 +92,7 @@ function charSay(kind: 'correct' | 'hint' | 'wrong') {
 async function choose(i: number) {
   if (phase.value !== 'ask' || picked.value !== null && !wrongOnce.value) return
   const ok = i === q.value.answerIndex
+  if (retrying.value) { picked.value = i; await finishRetry(ok); return }
   if (ok) { picked.value = i; await finishQ(true) }
   else if (!wrongOnce.value) { picked.value = i; wrongOnce.value = true; hinted.value = true; speech.value = charSay('hint'); playSfx('hint', S.s.sound) }
   else { picked.value = i; await finishQ(false) }
@@ -101,6 +100,7 @@ async function choose(i: number) {
 async function submitSpell() {
   if (!spell.value.trim()) return
   const ok = checkSpell(spell.value, q.value.word)
+  if (retrying.value) { await finishRetry(ok); return }
   if (ok) await finishQ(true)
   else if (!wrongOnce.value) { wrongOnce.value = true; hinted.value = true; speech.value = `${charSay('hint')}（${q.value.word.core}）`; spell.value = ''; playSfx('hint', S.s.sound); nextTick(() => spellEl.value?.focus()) }
   else await finishQ(false)
@@ -125,6 +125,16 @@ async function known() {
   await db.wordStates.put(plain(st))
   next()
 }
+const PAT_LINES = [
+  '摸摸头，没关系。这个词只是还没跟你混熟。',
+  '摸摸头。走散一次很正常，它一会儿还会回来找你。',
+  '没事的，摸摸头。刚才那句再看一眼，下次它就是你的了。',
+  '摸摸头。记不住不是你的问题，是它出现得还不够多。',
+]
+const gemBurst = ref(0)      // 触发钻石动效的计数器
+const comboNow = ref(0)
+const patLine = ref('')
+
 async function finishQ(correct: boolean) {
   lastCorrect.value = correct
   const ms = Math.round(performance.now() - startedAt.value)
@@ -132,17 +142,80 @@ async function finishQ(correct: boolean) {
   session.value = { ...session.value! }
   states.value = new Map(states.value)
   promoted.value = r.promoted
-  speech.value = correct ? charSay('correct') : charSay('wrong')
+  const combo = S.reward(correct)
+  comboNow.value = combo
+  if (correct) {
+    speech.value = charSay('correct')
+    gemBurst.value++
+    if (r.promoted) playSfx('collect', S.s.sound)
+    else if (combo % 5 === 0) playSfx('combo5', S.s.sound)
+    else playSfx('gem', S.s.sound, combo)
+    if (S.canIllustrate && !q.value.snippet.image) void illustrate(q.value)
+  } else {
+    speech.value = charSay('wrong')
+    patLine.value = S.s.plainMode ? '' : pick(PAT_LINES)
+    playSfx('pat', S.s.sound)
+  }
   showMeaning.value = !correct
-  playSfx(correct ? (r.promoted ? 'collect' : 'correct') : 'wrong', S.s.sound)
+  phase.value = 'feedback'
+}
+/** 答错后"再试一次"：不重复计分，只把当前题重新打开一次（作为练习，不写入记录） */
+function retry() {
+  retrying.value = true
+  picked.value = null; spell.value = ''; wrongOnce.value = true; hinted.value = true; speech.value = ''
+  phase.value = 'ask'
+  nextTick(() => spellEl.value?.focus())
+}
+const retrying = ref(false)
+async function finishRetry(ok: boolean) {
+  // 练习性重试：答对给一句鼓励与半颗钻石音，不改记忆状态
+  lastCorrect.value = ok
+  retrying.value = false
+  if (ok) { speech.value = S.s.plainMode ? '正确' : `${S.theme.characters[2].name}：看，这不就记住了。`; playSfx('gem', S.s.sound, 1); gemBurst.value++ ; S.s.gems += 1 }
+  else { speech.value = charSay('wrong'); patLine.value = S.s.plainMode ? '' : '摸摸头。先记下它的意思，我们往下走。'; playSfx('pat', S.s.sound) }
+  showMeaning.value = true
   phase.value = 'feedback'
 }
 function next() {
+  patLine.value = ''
   if (idx.value + 1 < qs.value.length) { idx.value++; phase.value = 'ask'; resetQ() }
   else finishSession()
 }
 
+/** 简笔漫画配图（用户开启且有图像密钥时），生成后缓存到该片段 */
+const illustrating = ref<Record<string, boolean>>({})
+async function illustrate(qq: Question) {
+  const cfg = S.imageCfg
+  if (!cfg) return
+  const key = qq.snippet.key
+  illustrating.value = { ...illustrating.value, [key]: true }
+  try {
+    const url = await generateImage(cfg, illustrationPrompt(qq.snippet.en, S.theme))
+    qq.snippet.image = url
+    if (qq.snippet.source !== 'plain') await db.snippets.put(plain({ ...qq.snippet, source: qq.snippet.source === 'static' ? 'generated' : qq.snippet.source }))
+    qs.value = [...qs.value]
+  } catch (e) { console.warn('illustrate failed', e) }
+  finally { const c = { ...illustrating.value }; delete c[key]; illustrating.value = c }
+}
+
+/** 过场：目标词所在句保留英文，其余中文 */
+function buildSceneSentences(en: string, cn: string[]) {
+  const parts = splitSentences(en)
+  if (parts.length !== cn.length) return undefined
+  return parts.map((p, i) => ({ en: p, target: /\*[^*]+\*/.test(p), cn: /\*[^*]+\*/.test(p) ? '' : localizeNames(cn[i], S.theme) }))
+}
+const sceneImage = ref('')
+const sceneIllustrating = ref(false)
+async function illustrateScene(en: string) {
+  const cfg = S.imageCfg
+  if (!cfg) return
+  sceneIllustrating.value = true
+  try { sceneImage.value = await generateImage(cfg, illustrationPrompt(en, S.theme)) } catch (e) { console.warn(e) }
+  finally { sceneIllustrating.value = false }
+}
+
 async function finishSession() {
+  sceneImage.value = ''
   const s = session.value!
   s.completed = true; s.endedAt = Date.now()
   session.value = { ...s }
@@ -155,11 +228,20 @@ async function finishSession() {
   const ws = qs.value.map(x => x.word)
   if (llmCfg.value) {
     try {
-      const txt = await generate(llmCfg.value, chapterScenePrompt(ws, chapterTitle.value, openHook.value), {
+      const txt = await generate(llmCfg.value, chapterScenePrompt(ws, chapterTitle.value, openHook.value, S.theme), {
         system: systemPrompt(S.theme, S.s.tone, S.s.styleTags), json: llmCfg.value.provider !== 'anthropic', maxTokens: 500,
       })
-      const j = extractJSON<{ en: string; cn: string; hook: string }>(txt)
-      if (j.en) scene.value = { en: String(j.en), cn: localizeNames(String(j.cn || ''), S.theme), hook: String(j.hook || '') }
+      const j = extractJSON<{ en: string; cn: string | string[]; hook: string }>(txt)
+      if (j.en) {
+        const cnArr = Array.isArray(j.cn) ? j.cn.map(String) : null
+        scene.value = {
+          en: String(j.en),
+          cn: cnArr ? '' : localizeNames(String(j.cn || ''), S.theme),
+          hook: String(j.hook || ''),
+          sentences: cnArr ? buildSceneSentences(String(j.en), cnArr) : undefined,
+        }
+        if (S.canIllustrate) void illustrateScene(scene.value.en)
+      }
     } catch (e) {
       console.warn(e)
       genError.value = String((e as any)?.message || e).slice(0, 120)
@@ -218,21 +300,32 @@ const sceneHtml = computed(() => (scene.value?.en || '').replace(/\*([^*]+)\*/g,
     <template v-else-if="(phase === 'ask' || phase === 'feedback') && q">
       <div class="row between">
         <div class="dots"><i v-for="(_, i) in qs" :key="i" :class="{ done: i < idx, cur: i === idx }"></i></div>
-        <span class="muted small">{{ idx + 1 }}/{{ qs.length }} <template v-if="q.isReview">· {{ S.t('review') }}</template></span>
+        <div class="row" style="gap: 12px">
+          <span class="gems small" :key="gemBurst" :class="{ pop: gemBurst > 0 }">💎 {{ S.s.gems }}<span v-if="S.s.combo >= 2" class="combo"> ×{{ S.s.combo }}</span></span>
+          <span class="muted small">{{ idx + 1 }}/{{ qs.length }} <template v-if="q.isReview">· {{ S.t('review') }}</template></span>
+        </div>
       </div>
 
       <div class="card rel">
         <span v-if="q.snippet.source !== 'plain'" class="aigc">AI 生成</span>
-        <p class="snippet" v-html="enHtml"></p>
+        <div v-if="q.snippet.image" class="illus"><img :src="q.snippet.image" alt="" /></div>
+        <div v-else-if="illustrating[q.snippet.key]" class="illus muted small center" style="padding: 18px 0">正在画这一幕…</div>
+        <SnippetText :snippet="q.snippet" :word="q.word" :mode="q.qtype === 'spell' && phase === 'ask' ? 'blank' : 'show'" :show-english="S.s.showEnglish || S.s.plainMode" />
         <p v-if="lineHtml && phase === 'ask'" class="snippet" style="margin-top: 12px; font-size: 17px">— <span v-html="lineHtml"></span></p>
-        <p class="hint-cn">{{ q.snippet.cnHint }}</p>
+        <p v-if="!q.snippet.sentences" class="hint-cn">{{ q.snippet.cnHint }}</p>
         <div v-if="speech" class="speech">{{ speech }}</div>
+        <div v-if="phase === 'feedback' && !lastCorrect && patLine" class="pat">
+          <span class="pat-hand">☁️</span> {{ patLine }}
+        </div>
         <div v-if="showMeaning || (phase === 'feedback' && lastCorrect)" class="hint-cn" style="margin-top: 12px">
           <b style="color: var(--fg)">{{ q.word.word }}</b> <span class="muted">/{{ q.word.us || q.word.uk }}/</span> — {{ q.word.core }}
           <div v-if="q.word.meanings.length > 1" class="small" style="margin-top: 4px">{{ q.word.meanings.map(m => m.pos + ' ' + m.cn).join('　') }}</div>
         </div>
         <p v-if="phase === 'feedback' && lastCorrect && q.snippet.hook" class="hook">{{ q.snippet.hook }}</p>
         <p v-if="phase === 'feedback' && promoted" class="hook pop" style="color: var(--accent); font-style: normal">✦ {{ q.word.word }} 成为{{ S.t('known') }}</p>
+        <div v-if="phase === 'feedback' && lastCorrect" class="gem-fly" :key="'g' + gemBurst">
+          <span v-for="k in Math.min(comboNow >= 5 && comboNow % 5 === 0 ? 3 : 1, 3)" :key="k" :style="{ '--d': (k - 1) * 0.08 + 's', '--x': (k - 2) * 26 + 'px' }">💎</span>
+        </div>
       </div>
 
       <template v-if="phase === 'ask'">
@@ -250,7 +343,11 @@ const sceneHtml = computed(() => (scene.value?.en || '').replace(/\*([^*]+)\*/g,
       </template>
 
       <template v-else>
-        <button class="btn block" @click="next">{{ idx + 1 < qs.length ? S.t('continue') + ' ▸' : '看看这一段的结局 ▸' }}</button>
+        <template v-if="!lastCorrect && !retrying && q.qtype !== 'fill'">
+          <button class="btn block" @click="retry">再试一次 ↻</button>
+          <button class="btn ghost block" @click="next">{{ idx + 1 < qs.length ? '先往下走 ▸' : '看看这一段的结局 ▸' }}</button>
+        </template>
+        <button v-else class="btn block" @click="next">{{ idx + 1 < qs.length ? S.t('continue') + ' ▸' : '看看这一段的结局 ▸' }}</button>
       </template>
     </template>
 
@@ -260,8 +357,17 @@ const sceneHtml = computed(() => (scene.value?.en || '').replace(/\*([^*]+)\*/g,
         <span class="aigc" v-if="scene && llmCfg">AI 生成</span>
         <p v-if="sceneLoading" class="muted center">{{ S.theme.characters[2].name }}正在整理这一段…</p>
         <template v-else-if="scene">
-          <p class="snippet" v-if="scene.en" v-html="sceneHtml"></p>
-          <p class="hint-cn" v-if="scene.cn">{{ scene.cn }}</p>
+          <div v-if="sceneImage" class="illus"><img :src="sceneImage" alt="" /></div>
+          <div v-else-if="sceneIllustrating" class="illus muted small center" style="padding: 18px 0">正在画这一幕…</div>
+          <div v-if="scene.sentences" class="snip-scene">
+            <template v-for="(s, i) in scene.sentences" :key="i">
+              <span v-if="s.target" class="snippet" style="font-size: 18px; background: color-mix(in srgb, var(--accent) 10%, transparent); padding: 2px 4px; border-radius: 6px" v-html="s.en.replace(/\*([^*]+)\*/, '<mark>$1</mark>')"></span>
+              <span v-else>{{ s.cn }}</span>
+              {{ ' ' }}
+            </template>
+          </div>
+          <p class="snippet" v-else-if="scene.en" v-html="sceneHtml"></p>
+          <p class="hint-cn" v-if="scene.cn && !scene.sentences">{{ scene.cn }}</p>
           <p class="hook" style="color: var(--fg); opacity: .85">{{ scene.hook }}</p>
         </template>
         <p v-if="genError" class="muted small" style="margin-top: 10px">（AI 生成未成功，已改用内置片段：{{ genError }}）</p>

@@ -72,6 +72,11 @@ const providerLabel = computed(() => ({ deepseek: 'DeepSeek', anthropic: 'Claude
           <div class="big">×{{ S.s.leaveTickets }}</div>
           <div class="muted small">每同行 7 天 +1</div>
         </div>
+        <div class="card" style="flex:1">
+          <div class="muted small">💎 钻石</div>
+          <div class="big" style="color: var(--accent2)">{{ S.s.gems }}</div>
+          <div class="muted small" v-if="S.s.comboBest >= 2">最高连击 ×{{ S.s.comboBest }}</div>
+        </div>
       </div>
     </div>
 

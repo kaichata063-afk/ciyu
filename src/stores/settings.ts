@@ -19,6 +19,16 @@ export interface Settings {
   baseUrls: Partial<Record<Provider, string>>
   allowGenerate: boolean     // 允许用我的密钥按需生成剧情
   preferFresh: boolean       // 有密钥时，词片段也优先即时生成（而非内置包）
+  showEnglish: boolean       // 剧情非目标句是否显示英文原文（默认只显示中文，点句可展开）
+  // 简笔漫画配图（可选，OpenAI 兼容图像接口）
+  illustrate: boolean
+  imageKey: string
+  imageBaseUrl: string
+  imageModel: string
+  // 奖励
+  gems: number
+  combo: number
+  comboBest: number
   streakDays: number
   streakBest: number
   leaveTickets: number
@@ -46,6 +56,14 @@ const DEFAULTS: Settings = {
   baseUrls: {},
   allowGenerate: true,
   preferFresh: false,
+  showEnglish: false,
+  illustrate: false,
+  imageKey: '',
+  imageBaseUrl: '',
+  imageModel: '',
+  gems: 0,
+  combo: 0,
+  comboBest: 0,
   streakDays: 0,
   streakBest: 0,
   leaveTickets: 1,
@@ -81,6 +99,26 @@ export const useSettings = defineStore('settings', () => {
   const t = (k: TermKey) => (s.value.plainMode ? PLAIN_TERMS[k] : theme.value.terms[k])
   const hasKey = computed(() => !!s.value.apiKeys[s.value.provider])
   const canGenerate = computed(() => hasKey.value && s.value.allowGenerate)
+  const canIllustrate = computed(() => s.value.illustrate && !!(s.value.imageKey || (s.value.provider === 'openai' && s.value.apiKeys.openai)))
+  const imageCfg = computed(() => canIllustrate.value ? {
+    apiKey: s.value.imageKey || s.value.apiKeys.openai!,
+    baseUrl: s.value.imageBaseUrl || (s.value.imageKey ? undefined : s.value.baseUrls.openai),
+    model: s.value.imageModel || undefined,
+  } : null)
+
+  /** 答对：+1 钻石，连击 +1；答错：连击归零。返回本次连击数 */
+  function reward(correct: boolean) {
+    if (correct) {
+      s.value.gems += 1
+      s.value.combo += 1
+      s.value.comboBest = Math.max(s.value.comboBest, s.value.combo)
+      // 连击奖励：每 5 连击额外 +2
+      if (s.value.combo % 5 === 0) s.value.gems += 2
+    } else {
+      s.value.combo = 0
+    }
+    return s.value.combo
+  }
 
   /** 每次打开/完成会话时调用：处理连胜、请假条、跨天 */
   function touchDay(completedSession = false) {
@@ -113,7 +151,7 @@ export const useSettings = defineStore('settings', () => {
     }
   }
 
-  return { s, theme, t, hasKey, canGenerate, touchDay }
+  return { s, theme, t, hasKey, canGenerate, canIllustrate, imageCfg, reward, touchDay }
 })
 
 function daysBetween(a: string, b: string) {

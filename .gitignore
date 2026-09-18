@@ -30,3 +30,5 @@ data-src/cet4.json
 
 # 未拆分的整包剧情（构建脚本产物备份）
 data-src/snippets-full/
+
+.shots/

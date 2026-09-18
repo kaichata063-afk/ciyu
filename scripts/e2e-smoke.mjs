@@ -1,9 +1,10 @@
 // 端到端冒烟：走完 onboarding → 一次完整会话 → 结算 → 通讯录 → 设置；截图到 /tmp/ciyu-shots
 import { chromium } from 'playwright'
 import { mkdirSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 const BASE = process.env.BASE || 'http://localhost:4173/'
-const OUT = '/tmp/ciyu-shots'
+const OUT = resolve('.shots')
 mkdirSync(OUT, { recursive: true })
 
 const browser = await chromium.launch()
@@ -37,9 +38,9 @@ async function run(name, viewport) {
   while (steps < 30) {
     steps++
     const done = await page.$('text=看看这一段的结局')
-    const cont = await page.$('button:has-text("继续 ▸")')
+    const cont = await page.$('button:has-text("继续 ▸")') || await page.$('button:has-text("先往下走 ▸")')
     if (done) { await shot(`04-q${steps}-feedback`); await done.click(); break }
-    if (cont) { await cont.click(); continue }
+    if (cont) { if (steps < 6) await shot(`04-q${steps}-feedback`); await cont.click(); continue }
     const opts = await page.$$('.opt:not([disabled])')
     const spell = await page.$('input.spell')
     if (opts.length) {

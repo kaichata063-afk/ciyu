@@ -49,6 +49,8 @@ export interface Snippet {
   cnHint: string              // 中文提示（不翻译目标词）
   hook: string                // 悬念句
   line?: string               // 台词填词用：含目标词的一句短台词
+  sentences?: { en: string; cn: string; target: boolean }[]   // 逐句：目标句 target=true 且 cn 为空（界面保留英文）
+  image?: string              // 简笔漫画 data URL 或远程地址（可选，用户密钥生成后缓存）
   source: 'static' | 'generated' | 'plain'
   aigc?: { provider: string; model: string; generatedAt: number }
 }
