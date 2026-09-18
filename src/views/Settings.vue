@@ -147,12 +147,12 @@ async function wipe() {
         <h3 style="margin:0">🎨 简笔漫画配图 <span class="muted small">（可选）</span></h3>
         <input type="checkbox" class="toggle" v-model="S.s.illustrate" />
       </div>
-      <p class="muted small">开启后，每答对一题、每段过场结束时，用图像模型为这一幕画一张黑白线稿。需要一个支持 <code>/v1/images/generations</code> 的密钥（OpenAI 的 gpt-image 系列、DALL·E，或任意兼容中转，模型名可自填、不限版本）。每张约 0.01–0.04 美元，按你自己的账户计费。</p>
+      <p class="muted small">开启后，每答对一题、每段过场结束时，用图像模型为这一幕画一张黑白线稿。需要一个支持 <code>/v1/images/generations</code> 的密钥（OpenAI 的 gpt-image 系列，如 gpt-image-2 / gpt-image-1、DALL·E，或任意兼容中转，模型名可自填、不限版本）。每张约 0.01–0.04 美元，按你自己的账户计费。</p>
       <template v-if="S.s.illustrate">
         <p v-if="!S.s.imageKey && S.s.apiKeys.openai" class="small" style="color: var(--accent)">将复用上面的 GPT 密钥。若想单独指定，填下面的字段。</p>
         <div class="field"><label>图像接口密钥（留空则复用 GPT 密钥）</label><input type="password" v-model="S.s.imageKey" placeholder="sk-…" autocomplete="off" /></div>
         <div class="field"><label>图像接口地址（留空用 https://api.openai.com）</label><input v-model="S.s.imageBaseUrl" placeholder="https://api.openai.com" /></div>
-        <div class="field"><label>图像模型（留空用 gpt-image-1，可自填任意版本）</label><input v-model="S.s.imageModel" placeholder="gpt-image-1 / gpt-image-1-mini / dall-e-3 / 自定义" /></div>
+        <div class="field"><label>图像模型（留空用 gpt-image-1，可自填任意版本）</label><input v-model="S.s.imageModel" placeholder="gpt-image-2 / gpt-image-1 / gpt-image-1-mini / dall-e-3 / 自定义" /></div>
         <div class="row">
           <button class="btn sm" :disabled="!S.canIllustrate || imgTesting" @click="testImage">{{ imgTesting ? '生成中…' : '试画一张' }}</button>
           <span class="small" :style="{ color: imgMsg.startsWith('✓') ? 'var(--accent)' : 'var(--accent2)' }">{{ imgMsg }}</span>

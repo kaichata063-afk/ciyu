@@ -18,7 +18,8 @@ export async function generateImage(cfg: ImageConfig, prompt: string, signal?: A
     // DALL·E 系列：默认返回远程 URL，显式要 base64
     body.response_format = 'b64_json'
   } else if (/gpt-image/i.test(model)) {
-    // gpt-image 全系列（含 mini 及后续版本）：始终返回 base64、不接受 response_format，可传 quality
+    // gpt-image 全系列（gpt-image-1 / gpt-image-1-mini / gpt-image-2 及后续版本）：
+    // 始终返回 base64、不接受 response_format，可传 quality
     body.quality = cfg.quality || 'low'
   }
   // 其它未知/第三方兼容模型：只发 model+prompt+n+size，不塞可能不被支持的参数
